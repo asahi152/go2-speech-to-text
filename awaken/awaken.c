@@ -3,9 +3,10 @@
 #include <unistd.h>
 #include <errno.h>
 
-#include "/home/byc/go2_sdk/unitree_sdk2_python/awaken/include/msp_cmn.h"
-#include "/home/byc/go2_sdk/unitree_sdk2_python/awaken/include/qivw.h"
-#include "/home/byc/go2_sdk/unitree_sdk2_python/awaken/include/msp_errors.h"
+#include "./awaken/include/msp_cmn.h"
+#include "./awaken/include/qivw.h"
+#include "./awaken/include/msp_errors.h"
+
 
 #define IVW_AUDIO_FILE_NAME "awake.pcm"
 #define FRAME_LEN	640 //16k采样率的16bit音频，一帧的大小为640B, 时长20ms

@@ -157,7 +157,7 @@ def on_open(ws):
 
 # 唤醒词处理
 def wake_detection():
-    # 编译 awake.c 文件
+    # 编译 awaken.c 文件
     compile_command = "gcc -o awaken_exec awaken/awaken.c -I./awaken/include -L./awaken/libs/x64 -lmsc -lw_ivw"  
     compile_result = subprocess.run(compile_command, shell=True)
 
@@ -219,7 +219,7 @@ if __name__ == "__main__":
     convert_wav_to_pcm(wav_file,pcm_file)
     
     #将录制好的音频放入awaken.c指定的文件夹中 
-    folder_path = '/home/byc/go2_sdk/unitree_sdk2_python/awaken/bin/audio'
+    folder_path = './awaken/bin/audio'
     file_name = 'awake.pcm'
     file_path = os.path.join(folder_path, file_name)
     # 写入文件
