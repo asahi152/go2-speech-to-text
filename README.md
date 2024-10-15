@@ -45,4 +45,4 @@ pip install websocket-client pydub SpeechRecognition
    python3 STT.py <网络接口名>
    ```
 
-  本项目录音生成的wav文件会自动转化为pcm文件储存在根目录，唤醒词awaken.pcm会复制到./awaken/bin/audio文件夹中等待处理。
+  本项目录音生成的wav文件会自动转化为pcm文件储存在根目录，唤醒词awaken.pcm会复制到./awaken/bin/audio文件夹中等待处理，确保该文件夹存在。
