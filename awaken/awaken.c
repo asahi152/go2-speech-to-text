@@ -3,9 +3,9 @@
 #include <unistd.h>
 #include <errno.h>
 
-#include "./awaken/include/msp_cmn.h"
-#include "./awaken/include/qivw.h"
-#include "./awaken/include/msp_errors.h"
+#include "./include/msp_cmn.h"
+#include "./include/qivw.h"
+#include "./include/msp_errors.h"
 
 
 #define IVW_AUDIO_FILE_NAME "awake.pcm"
