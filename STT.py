@@ -17,10 +17,10 @@ from time import mktime
 import _thread as thread
 import speech_recognition as sr
 from pydub import AudioSegment
-import subprocess
 import os
 import shutil
-
+import signal
+import snowboydecoder
 
 STATUS_FIRST_FRAME = 0  # 第一帧的标识
 STATUS_CONTINUE_FRAME = 1  # 中间帧标识
@@ -154,29 +154,16 @@ def on_open(ws):
 
     thread.start_new_thread(run, ())
 
+interrupted = False
 
-# 唤醒词处理
-def wake_detection():
-    # 编译 awaken.c 文件
-    compile_command = "gcc -o awaken_exec awaken/awaken.c -I./awaken/include -L./awaken/libs/x64 -lmsc -lw_ivw"  
-    compile_result = subprocess.run(compile_command, shell=True)
+def signal_handler(signal, frame):
+    global interrupted
+    interrupted = True
 
-    print("编译成功，开始唤醒词检测...")
+def interrupt_callback():
+    global interrupted
+    return interrupted
 
-    # 这里调用科大讯飞的语音识别SDK文件进行唤醒词识别
-    result = subprocess.run(["./awaken_exec"],capture_output=True, text=True)  
-
-    print("唤醒词识别完成，输出结果：", result.stdout)
-
-   # 检查是否包含唤醒词
-    if "MSP_IVW_MSG_WAKEUP" in result.stdout:
-        print("检测到唤醒词！")
-        return 1
-    else:
-        print("未检测到唤醒词。")
-        return 0
-
-#从系统麦克风拾取音频数据，采样率为 16000。能在用户结束说话时自动停止录制。
 def rec(rate=16000):
     r = sr.Recognizer()
     with sr.Microphone(sample_rate=rate) as source:
@@ -189,69 +176,145 @@ def rec(rate=16000):
 
     return 1
 
-# 另一个录制函数，用来录制唤醒词音频
-def rec_awake(rate=16000):
-    r = sr.Recognizer()
-    with sr.Microphone(sample_rate=rate) as source:
-        print('正在获取声音中...')
-        audio = r.listen(source,timeout=10, phrase_time_limit=5)
-
-    with open("awake.wav", "wb") as f:
-        f.write(audio.get_wav_data())
-        print('声音获取完成.')
-
-    return 1
-
 # 将录制得到的WAV格式文件转换为 PCM 格式
 def convert_wav_to_pcm(wav_file, pcm_file):
     audio = AudioSegment.from_wav(wav_file)
     audio.export(pcm_file, format="raw")  # PCM 格式
 
-if __name__ == "__main__":
-    # sys.argv[1]: name of the network interface
-    ChannelFactoryInitialize(0, sys.argv[1])   #初始化通道
+# 语音唤醒之后播放的应答
+model = 'resources/models/snowboy.umdl'
+
+# 终止方法为ctrl+c
+signal.signal(signal.SIGINT, signal_handler)
+
+# 这里可以设置识别灵敏度
+detector = snowboydecoder.HotwordDetector(model, sensitivity=0.5)
+print('Listening... Press Ctrl+C to exit')
+
+# sys.argv[1]: name of the network interface
+ChannelFactoryInitialize(0, sys.argv[1])   #初始化通道
+
+def recognize(audio_file):
+    # 唤醒后开始录音
+    wav_file = "recording.wav"
+    pcm_file = "output_audio.pcm"
+
+    # 转换音频格式
+    convert_wav_to_pcm(wav_file, pcm_file)
+
+    # 测试时候在此处正确填写相关信息即可运行
+    time1 = datetime.now()
+    wsParam = Ws_Param(APPID='1b8f255d', APISecret='ZTNkMTcwYWU2ZWQyNGY2OTljYmE2OWY5',
+                    APIKey='eae6e40b8cdf5a4836fdb8c4bf6301e9',
+                    AudioFile=r'output_audio.pcm')
+    websocket.enableTrace(False)
+    wsUrl = wsParam.create_url()
+    ws = websocket.WebSocketApp(wsUrl, on_message=on_message, on_error=on_error, on_close=on_close)
+    ws.on_open = on_open
+    ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
+    time2 = datetime.now()
+    print(time2-time1)
+
+
+def callback():
+    print("唤醒之后的回调函数")
+    print("开始录音...")
+    audio_file = rec()  # 使用 rec 函数进行录音
+    recognize(audio_file)  # 调用语音识别函数，识别录制的音频
     
-    print('下面开始唤醒词的录制')
-    # 录制唤醒词音频
-    rec_awake()
-    wav_file = "awake.wav"
-    pcm_file = "awake.pcm"
-    convert_wav_to_pcm(wav_file,pcm_file)
+detector.start(detected_callback=callback, # 自定义回调函数
+                   interrupt_check=interrupt_callback,
+                   sleep_time=0.03)
     
-    #将录制好的音频放入awaken.c指定的文件夹中 
-    folder_path = './awaken/bin/audio'
-    file_name = 'awake.pcm'
-    file_path = os.path.join(folder_path, file_name)
-    # 写入文件
-    shutil.copy(pcm_file, file_path)  # 使用 shutil.copy 复制文件
+# 释放资源
+detector.terminate()
 
-    print(f'文件已保存到: {file_path}')
 
-    # 开始检测唤醒词
-    flag = wake_detection()
-    # 检测成功后开始录音并且调用语音听写API
-    if flag == 1:      
-        print('已成功唤醒！') 
-        # 唤醒后开始录音
-        rec()
-        wav_file = "recording.wav"
-        pcm_file = "output_audio.pcm"
 
-        # 转换音频格式
-        convert_wav_to_pcm(wav_file, pcm_file)
+# # 唤醒词处理   使用了科大讯飞的sdk，但仅适用于x86和x64架构，由于机器人采用的是arm故替换为snowboy语音唤醒
+# def wake_detection():
+#     # 编译 awaken.c 文件
+#     compile_command = "gcc -o awaken_exec awaken/awaken.c -I./awaken/include -L./awaken/libs/x64 -lmsc -lw_ivw"  
+#     compile_result = subprocess.run(compile_command, shell=True)
 
-        # 测试时候在此处正确填写相关信息即可运行
-        time1 = datetime.now()
-        wsParam = Ws_Param(APPID='1b8f255d', APISecret='ZTNkMTcwYWU2ZWQyNGY2OTljYmE2OWY5',
-                        APIKey='eae6e40b8cdf5a4836fdb8c4bf6301e9',
-                        AudioFile=r'output_audio.pcm')
-        websocket.enableTrace(False)
-        wsUrl = wsParam.create_url()
-        ws = websocket.WebSocketApp(wsUrl, on_message=on_message, on_error=on_error, on_close=on_close)
-        ws.on_open = on_open
-        ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
-        time2 = datetime.now()
-        print(time2-time1)
+#     print("编译成功，开始唤醒词检测...")
+
+#     # 这里调用科大讯飞的语音识别SDK文件进行唤醒词识别
+#     result = subprocess.run(["./awaken_exec"],capture_output=True, text=True)  
+
+#     print("唤醒词识别完成，输出结果：", result.stdout)
+
+#    # 检查是否包含唤醒词
+#     if "MSP_IVW_MSG_WAKEUP" in result.stdout:
+#         print("检测到唤醒词！")
+#         return 1
+#     else:
+#         print("未检测到唤醒词。")
+#         return 0
+
+#从系统麦克风拾取音频数据，采样率为 16000。能在用户结束说话时自动停止录制。
+
+# # 另一个录制函数，用来录制唤醒词音频
+# def rec_awake(rate=16000):
+#     r = sr.Recognizer()
+#     with sr.Microphone(sample_rate=rate) as source:
+#         print('正在获取声音中...')
+#         audio = r.listen(source,timeout=10, phrase_time_limit=5)
+
+#     with open("awake.wav", "wb") as f:
+#         f.write(audio.get_wav_data())
+#         print('声音获取完成.')
+
+#     return 1
+
+
+
+# if __name__ == "__main__":
+#     # sys.argv[1]: name of the network interface
+#     ChannelFactoryInitialize(0, sys.argv[1])   #初始化通道
+    
+#     # print('下面开始唤醒词的录制')
+#     # # 录制唤醒词音频
+#     # rec_awake()
+#     # wav_file = "awake.wav"
+#     # pcm_file = "awake.pcm"
+#     # convert_wav_to_pcm(wav_file,pcm_file)
+    
+#     # #将录制好的音频放入awaken.c指定的文件夹中 
+#     # folder_path = './awaken/bin/audio'
+#     # file_name = 'awake.pcm'
+#     # file_path = os.path.join(folder_path, file_name)
+#     # # 写入文件
+#     # shutil.copy(pcm_file, file_path)  # 使用 shutil.copy 复制文件
+
+#     # print(f'文件已保存到: {file_path}')
+
+#     # # 开始检测唤醒词
+#     # flag = wake_detection()
+
+#     # 检测成功后开始录音并且调用语音听写API
+#     if flag == 1:      
+#         print('已成功唤醒！') 
+#         # 唤醒后开始录音
+#         rec()
+#         wav_file = "recording.wav"
+#         pcm_file = "output_audio.pcm"
+
+#         # 转换音频格式
+#         convert_wav_to_pcm(wav_file, pcm_file)
+
+#         # 测试时候在此处正确填写相关信息即可运行
+#         time1 = datetime.now()
+#         wsParam = Ws_Param(APPID='1b8f255d', APISecret='ZTNkMTcwYWU2ZWQyNGY2OTljYmE2OWY5',
+#                         APIKey='eae6e40b8cdf5a4836fdb8c4bf6301e9',
+#                         AudioFile=r'output_audio.pcm')
+#         websocket.enableTrace(False)
+#         wsUrl = wsParam.create_url()
+#         ws = websocket.WebSocketApp(wsUrl, on_message=on_message, on_error=on_error, on_close=on_close)
+#         ws.on_open = on_open
+#         ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
+#         time2 = datetime.now()
+#         print(time2-time1)
 
 
 
